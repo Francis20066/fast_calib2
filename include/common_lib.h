@@ -429,7 +429,7 @@ void sortPatternCenters(pcl::PointCloud<pcl::PointXYZ>::Ptr pc,
 
   // --- Sorting based on the local coordinate system of the pattern ---
   // 1. Calculate the centroid of the points
-  Eigen::Vector4f centroid;
+  Eigen::Vector4f centroid = Eigen::Vector4f::Zero();
   pcl::compute3DCentroid(*work_pc, centroid);
   pcl::PointXYZ ref_origin(centroid[0], centroid[1], centroid[2]);
 
@@ -601,10 +601,10 @@ class Square
  
       // Compute candidates centroid
       _center.x = _center.y = _center.z = 0;
-      for (int i = 0; i < candidates.size(); ++i) {
-        _center.x += candidates[i].x;
-        _center.y += candidates[i].y;
-        _center.z += candidates[i].z;
+      for (const auto& candidate : candidates) {
+        _center.x += candidate.x;
+        _center.y += candidate.y;
+        _center.z += candidate.z;
       }
  
       _center.x /= candidates.size();
@@ -637,8 +637,8 @@ class Square
       for(const auto& p : _candidates) candidates_cloud->push_back(p);
 
       // Check if candidates are at a reasonable distance from their centroid
-      for (int i = 0; i < _candidates.size(); ++i) {
-        float d = distance(_center, _candidates[i]);
+      for (const auto& candidate : _candidates) {
+        float d = distance(_center, candidate);
         // Check if distance from center to corner is close to half the diagonal length
         if (fabs(d - _target_diagonal / 2.) / (_target_diagonal / 2.) > GEOMETRY_TOLERANCE * 2.0) { // Loosened tolerance slightly
           return false;

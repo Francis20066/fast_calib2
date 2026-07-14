@@ -9,7 +9,7 @@ which is included as part of this source code package.
 #define QR_DETECT_HPP
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
-#include <opencv2/objdetect/aruco_detector.hpp>
+#include <opencv2/aruco.hpp>
 #include "common_lib.h"
 
 class QRDetect 
@@ -19,7 +19,7 @@ class QRDetect
     double marker_size_, delta_width_qr_center_, delta_height_qr_center_;
     double delta_width_circles_, delta_height_circles_;
     int min_detected_markers_;
-    cv::aruco::Dictionary dictionary_;
+    cv::Ptr<cv::aruco::Dictionary> dictionary_;
   
   public:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr qr_pub_;
@@ -144,18 +144,19 @@ class QRDetect
       }
 
       std::vector<int> boardIds{1, 2, 4, 3};  // IDs order as explained above
-      cv::aruco::Board board(boardCorners, dictionary_, boardIds);
+      cv::Ptr<cv::aruco::Board> board =
+          cv::aruco::Board::create(boardCorners, dictionary_, boardIds);
 
-      cv::aruco::DetectorParameters parameters;
-      parameters.cornerRefinementMethod = cv::aruco::CORNER_REFINE_SUBPIX;
+      cv::Ptr<cv::aruco::DetectorParameters> parameters =
+          cv::aruco::DetectorParameters::create();
+      parameters->cornerRefinementMethod = cv::aruco::CORNER_REFINE_SUBPIX;
 
       std::vector<int> ids;
       std::vector<std::vector<cv::Point2f>> corners;
-      cv::aruco::ArucoDetector detector(dictionary_, parameters);
-      detector.detectMarkers(image, corners, ids);
+      cv::aruco::detectMarkers(image, dictionary_, corners, ids, parameters);
 
       // Draw detections if at least one marker detected
-      if (ids.size() > 0) cv::aruco::drawDetectedMarkers(imageCopy_, corners, ids);
+      if (!ids.empty()) cv::aruco::drawDetectedMarkers(imageCopy_, corners, ids);
 
       cv::Vec3d rvec(0, 0, 0), tvec(0, 0, 0);  // Vectors to store initial guess
       
@@ -163,10 +164,11 @@ class QRDetect
 
       // ids.size(): 4
       // Compute initial guess as average of individual markers poses
-      if (ids.size() >= min_detected_markers_ && ids.size() <= TARGET_NUM_CIRCLES) 
+      if (ids.size() >= static_cast<std::size_t>(min_detected_markers_) &&
+          ids.size() <= TARGET_NUM_CIRCLES)
       {
         vector<Vec3d> rvecs, tvecs;
-        Vec3f rvec_sin, rvec_cos;
+        Vec3f rvec_sin(0, 0, 0), rvec_cos(0, 0, 0);
         const std::vector<cv::Point3f> markerObjPoints = {
           cv::Point3f(-0.5f,  0.5f, 0), cv::Point3f(0.5f,  0.5f, 0),
           cv::Point3f( 0.5f, -0.5f, 0), cv::Point3f(-0.5f, -0.5f, 0)};
@@ -181,11 +183,7 @@ class QRDetect
         }
 
         // Draw markers' axis and centers in color image (Debug purposes)
-        for (int i = 0; i < ids.size(); i++) {
-          double x = tvecs[i][0];
-          double y = tvecs[i][1];
-          double z = tvecs[i][2];
-
+        for (std::size_t i = 0; i < ids.size(); ++i) {
           cv::drawFrameAxes(imageCopy_, cameraMatrix_, distCoeffs_, rvecs[i],
                               tvecs[i], 0.1);
 
@@ -214,10 +212,12 @@ class QRDetect
         // pcl::PointCloud<pcl::PointXYZ>::Ptr centers_cloud(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::PointCloud<pcl::PointXYZ>::Ptr candidates_cloud(new pcl::PointCloud<pcl::PointXYZ>);
 
-        cv::Mat boardObjPoints, boardImgPoints;
-        board.matchImagePoints(corners, ids, boardObjPoints, boardImgPoints);
-        cv::solvePnP(boardObjPoints, boardImgPoints, cameraMatrix_, distCoeffs_,
-                     rvec, tvec, true);
+        const int matched_markers = cv::aruco::estimatePoseBoard(
+            corners, ids, board, cameraMatrix_, distCoeffs_, rvec, tvec, true);
+        if (matched_markers == 0) {
+          RCLCPP_WARN(logger_, "Detected markers do not belong to the calibration board");
+          return;
+        }
 
 
         // cout << "board: " <<  tvec[0] << ", "<< tvec[1] << ", " << tvec[2] << std::endl;
@@ -238,7 +238,7 @@ class QRDetect
         t.copyTo(board_transform.rowRange(0, 3).col(3));
 
         // Compute coordintates of circle centers
-        for (int i = 0; i < boardCircleCenters.size(); ++i) {
+        for (std::size_t i = 0; i < boardCircleCenters.size(); ++i) {
           cv::Mat mat = cv::Mat::zeros(4, 1, CV_32F);
           mat.at<float>(0, 0) = boardCircleCenters[i].x;
           mat.at<float>(1, 0) = boardCircleCenters[i].y;
@@ -283,14 +283,14 @@ class QRDetect
         **/
         std::vector<std::vector<int>> groups;
         comb(candidates_cloud->size(), TARGET_NUM_CIRCLES, groups);
-        double groups_scores[groups.size()];  // -1: invalid; 0-1 normalized score
+        std::vector<double> groups_scores(groups.size());
         // groups.size() 1
 
-        for (int i = 0; i < groups.size(); ++i) 
+        for (std::size_t i = 0; i < groups.size(); ++i)
         {
           std::vector<pcl::PointXYZ> candidates;
           // Build candidates set
-          for (int j = 0; j < groups[i].size(); ++j) {
+          for (std::size_t j = 0; j < groups[i].size(); ++j) {
             pcl::PointXYZ center;
             center.x = candidates_cloud->at(groups[i][j]).x;
             center.y = candidates_cloud->at(groups[i][j]).y;
@@ -306,9 +306,9 @@ class QRDetect
                                 : -1;  // -1 when it's not valid, 1 otherwise
         }
 
-        int best_candidate_idx = -1;
+        std::size_t best_candidate_idx = groups.size();
         double best_candidate_score = -1;
-        for (int i = 0; i < groups.size(); ++i) 
+        for (std::size_t i = 0; i < groups.size(); ++i)
         {
           if (best_candidate_score == 1 && groups_scores[i] == 1) {
             // Exit 4: Several candidates fit target's geometry
@@ -323,7 +323,7 @@ class QRDetect
           }
         }
 
-        if (best_candidate_idx == -1) 
+        if (best_candidate_idx == groups.size())
         {
           // Exit: No candidates fit target's geometry
           RCLCPP_WARN(logger_,
@@ -332,14 +332,14 @@ class QRDetect
           return;
         }
 
-        for (int j = 0; j < groups[best_candidate_idx].size(); ++j) 
+        for (std::size_t j = 0; j < groups[best_candidate_idx].size(); ++j)
         {
           centers_cloud->push_back(candidates_cloud->at(groups[best_candidate_idx][j]));
         }
 
         if (DEBUG) 
         {  // Draw centers
-          for (int i = 0; i < centers_cloud->size(); i++) {
+          for (std::size_t i = 0; i < centers_cloud->size(); ++i) {
             cv::Point3f pt_circle1(centers_cloud->at(i).x, centers_cloud->at(i).y,centers_cloud->at(i).z);
             cv::Point2f uv_circle1;
             uv_circle1 = projectPointDist(pt_circle1, cameraMatrix_, distCoeffs_);
