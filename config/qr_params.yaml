@@ -1,0 +1,38 @@
+/**:
+  ros__parameters:
+    fx: 516.151714
+    fy: 515.933828
+    cx: 977.179900
+    cy: 551.475794
+    k1: 0.0
+    k2: 0.0
+    p1: 0.0
+    p2: 0.0
+
+    marker_size: 0.20
+    delta_width_qr_center: 0.55
+    delta_height_qr_center: 0.35
+    delta_width_circles: 0.5
+    delta_height_circles: 0.4
+    circle_radius: 0.12
+    annulus_half_width: 0.025
+    board_width: 1.4
+    board_height: 1.0
+    board_roi_margin: 0.08
+    board_roi_depth: 0.12
+    auto_roi_voxel_leaf: 0.01
+    annulus_voxel_leaf: 0.005
+    use_auto_lidar_roi: true
+    lidar_flip_yz: true
+
+    x_min: 1.0
+    x_max: 2.5
+    y_min: -0.5
+    y_max: 1.8
+    z_min: 0.0
+    z_max: 1.5
+
+    lidar_topic: "/livox/lidar_10_177_88_203"
+    bag_path: "/home/nvidia/workspace/sculptor_calib_ws/cam1_lidar2_1_undistorted"
+    image_path: "/home/nvidia/workspace/sculptor_calib_ws/cam1_lidar2_1_undistorted.png"
+    output_path: "/home/nvidia/workspace/sculptor_calib_ws/calib_data/lidar_camera/cam1_lidar2_1_output"
